@@ -21,10 +21,10 @@ class Config:
 
     # ---- PostgreSQL -----------------------------------------------------
     db_host: str = os.getenv("DB_HOST", "localhost")
-    db_port: int = int(os.getenv("DB_PORT", "5432"))
+    db_port: int = int(os.getenv("DB_PORT", "5433"))
     db_name: str = os.getenv("DB_NAME", "polygon")
     db_user: str = os.getenv("DB_USER", "postgres")
-    db_password: str = os.getenv("DB_PASSWORD", "")
+    db_password: str = os.getenv("DB_PASSWORD", "pass")
 
     # ---- Indexer tuning -------------------------------------------------
     block_batch_size: int = int(os.getenv("BLOCK_BATCH_SIZE", "5"))

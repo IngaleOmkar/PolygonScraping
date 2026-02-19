@@ -105,7 +105,7 @@ CREATE TABLE logs (
     block_number        BIGINT          NOT NULL,
     transaction_hash    CHAR(66)        NOT NULL,
     transaction_index   INT             NOT NULL,
-    log_index           INT             NOT NULL,
+    log_index           BIGINT          NOT NULL,
     address             CHAR(42)        NOT NULL,   -- contract that emitted the event
     data                TEXT            NOT NULL DEFAULT '0x',
     topic0              CHAR(66)        NULL,       -- event signature hash
@@ -133,7 +133,7 @@ CREATE INDEX idx_logs_address_topic0 ON logs (address, topic0);
 CREATE TABLE token_transfers_erc20 (
     block_number        BIGINT          NOT NULL,
     transaction_hash    CHAR(66)        NOT NULL,
-    log_index           INT             NOT NULL,
+    log_index           BIGINT          NOT NULL,
     token_address       CHAR(42)        NOT NULL,   -- ERC-20 contract address
     from_address        CHAR(42)        NOT NULL,
     to_address          CHAR(42)        NOT NULL,
@@ -161,7 +161,7 @@ CREATE INDEX idx_erc20_block ON token_transfers_erc20 (block_number);
 CREATE TABLE token_transfers_erc721 (
     block_number        BIGINT          NOT NULL,
     transaction_hash    CHAR(66)        NOT NULL,
-    log_index           INT             NOT NULL,
+    log_index           BIGINT          NOT NULL,
     token_address       CHAR(42)        NOT NULL,   -- ERC-721 contract address
     from_address        CHAR(42)        NOT NULL,
     to_address          CHAR(42)        NOT NULL,
