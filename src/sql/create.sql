@@ -25,15 +25,16 @@ CREATE TABLE blocks (
     transactions_root   CHAR(66)        NOT NULL,
     state_root          CHAR(66)        NOT NULL,
     receipts_root       CHAR(66)        NOT NULL,
-    miner               CHAR(42)        NOT NULL,       -- 0x-prefixed, 20-byte address
-    difficulty          NUMERIC(38,0)   NOT NULL DEFAULT 0,
-    total_difficulty    NUMERIC(38,0)   NOT NULL DEFAULT 0,
+    miner               CHAR(42)        NOT NULL,       -- 0x-prefixed, 20-byte address (0x00 on Polygon)
+    proposer            CHAR(42)        NULL,           -- validator proposer recovered from extraData (Polygon/IBFT)
+    difficulty          NUMERIC(38,0)   NULL,           -- NULLable: not meaningful on Bor/PoS
+    total_difficulty    NUMERIC(38,0)   NULL,
     size                BIGINT          NOT NULL,
     extra_data          TEXT            NOT NULL DEFAULT '0x',
     gas_limit           BIGINT          NOT NULL,
     gas_used            BIGINT          NOT NULL,
     base_fee_per_gas    NUMERIC(38,0)   NULL,           -- post EIP-1559 (nullable for pre-1559 blocks)
-    block_timestamp     TIMESTAMP       NOT NULL,       -- derived from UNIX epoch
+    block_timestamp     TIMESTAMPTZ     NOT NULL,       -- derived from UNIX epoch (UTC)
 
     CONSTRAINT pk_blocks PRIMARY KEY (block_number),
     CONSTRAINT uq_blocks_hash UNIQUE (block_hash)
@@ -41,6 +42,7 @@ CREATE TABLE blocks (
 
 CREATE INDEX idx_blocks_timestamp ON blocks (block_timestamp);
 CREATE INDEX idx_blocks_miner ON blocks (miner);
+CREATE INDEX idx_blocks_proposer ON blocks (proposer) WHERE proposer IS NOT NULL;
 
 -- ============================================================
 -- 2. TRANSACTIONS
@@ -80,10 +82,10 @@ CREATE TABLE receipts (
     transaction_index   INT             NOT NULL,
     cumulative_gas_used BIGINT          NOT NULL,
     gas_used            BIGINT          NOT NULL,
-    effective_gas_price NUMERIC(38,0)   NOT NULL DEFAULT 0,
-    contract_address    CHAR(42)        NULL,       -- non-NULL only for contract creation txns
-    status              SMALLINT        NOT NULL,   -- 1 = success, 0 = failure
-    root                CHAR(66)        NULL,       -- pre-Byzantium state root (legacy)
+    effective_gas_price NUMERIC(38,0)   NULL,           -- may be missing pre-1559 or in edge cases
+    contract_address    CHAR(42)        NULL,           -- non-NULL only for contract creation txns
+    status              SMALLINT        NOT NULL,       -- 1 = success, 0 = failure
+    root                CHAR(66)        NULL,           -- pre-Byzantium state root (legacy)
     logs_bloom          VARCHAR(514)    NOT NULL,
 
     CONSTRAINT pk_receipts PRIMARY KEY (transaction_hash),

@@ -50,6 +50,8 @@ class RpcClient:
         endpoint: str,
         request_delay: float = 0.1,
         timeout: int = 120,
+        max_retries: int = 6,
+        backoff_factor: float = 2.0,
     ):
         self.endpoint = endpoint
         self.request_delay = request_delay
@@ -59,12 +61,12 @@ class RpcClient:
         # Persistent session with retry strategy
         self.session = requests.Session()
         retry = Retry(
-            total=6,
-            backoff_factor=2,
+            total=max_retries,
+            backoff_factor=backoff_factor,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["POST"],
         )
-        adapter = HTTPAdapter(max_retries=retry, pool_connections=1, pool_maxsize=1)
+        adapter = HTTPAdapter(max_retries=retry, pool_connections=1, pool_maxsize=2)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
         self.session.headers.update({"Content-Type": "application/json"})

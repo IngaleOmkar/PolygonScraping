@@ -3,14 +3,16 @@ Core indexing pipeline — fetches, parses, and persists Polygon chain data.
 
 Pipeline per batch
 ------------------
-1. Fetch *N* blocks with full transaction objects  (batch JSON-RPC)
-2. Fetch all transaction receipts for those blocks (batch JSON-RPC, chunked)
-3. Parse receipts → logs; decode Transfer events → ERC-20 / ERC-721 rows
-4. Atomically commit everything + checkpoint to PostgreSQL
-5. Repeat — or sleep-poll when at the chain tip
+1. Fan out *N* blocks across healthy RPC endpoints in parallel
+   (each worker fetches one block + all its receipts from a single endpoint).
+2. Gather results; retry failures on different endpoints.
+3. Reconcile — verify parent-hash chain and receipt completeness.
+4. Parse receipts → logs; decode Transfer events → ERC-20 / ERC-721 rows.
+5. Atomically commit everything + checkpoint to PostgreSQL.
+6. Repeat — or sleep-poll when at the chain tip.
 
-The ``traces`` table is **not** populated because the RPC endpoint blocks
-``trace_*`` and ``debug_*`` methods (HTTP 403).  Traces can be back-filled
+The ``traces`` table is **not** populated because most public endpoints
+block ``trace_*`` / ``debug_*`` methods.  Traces can be back-filled
 later if a trace-capable endpoint becomes available.
 """
 
@@ -19,7 +21,7 @@ import time
 import logging
 
 from config import Config
-from rpc_client import RpcClient
+from endpoint_pool import EndpointPool, BlockResult
 from database import Database
 from parsers import (
     parse_block_with_transactions,
@@ -55,16 +57,18 @@ class _Shutdown:
 
 class Indexer:
     """
-    Orchestrates the block-by-block indexing loop.
+    Orchestrates the block-by-block indexing loop using a pool of
+    RPC endpoints for parallel fetching.
 
     * Fully idempotent — safe to kill and restart at any time.
     * Checkpoint is updated inside the same DB transaction as the data,
       so you never get partial batches.
-    * Logs throughput statistics after every batch.
+    * Reconciles data from multiple endpoints before committing.
+    * Logs throughput statistics and per-endpoint health after every batch.
     """
 
-    def __init__(self, rpc: RpcClient, db: Database, cfg: Config):
-        self.rpc = rpc
+    def __init__(self, pool: EndpointPool, db: Database, cfg: Config):
+        self.pool = pool
         self.db = db
         self.cfg = cfg
         self._shutdown = _Shutdown()
@@ -84,17 +88,17 @@ class Indexer:
         current = start_block
 
         logger.info(
-            "▶ Indexer started  |  start=%d  batch=%d  rpc_chunk=%d  delay=%dms",
+            "▶ Indexer started  |  start=%d  batch=%d  workers=%d  endpoints=%d",
             current,
             self.cfg.block_batch_size,
-            self.cfg.rpc_batch_size,
-            int(self.cfg.request_delay * 1000),
+            self.cfg.parallel_workers,
+            len(self.cfg.all_endpoints),
         )
         self._t0 = time.monotonic()
 
         while not self._shutdown.requested:
             # Find out how far the chain has progressed
-            chain_tip = self.rpc.get_latest_block_number()
+            chain_tip = self.pool.get_latest_block_number()
 
             if current > chain_tip:
                 logger.info("💤 At chain tip (%d) — polling …", chain_tip)
@@ -136,62 +140,43 @@ class Indexer:
 
     def _process_batch(self, from_block: int, to_block: int) -> None:
         t_start = time.monotonic()
+        block_numbers = list(range(from_block, to_block + 1))
 
-        # ── 1. Fetch blocks (with full tx objects) ──────────────────────
-        block_calls = [
-            ("eth_getBlockByNumber", [hex(n), True])
-            for n in range(from_block, to_block + 1)
-        ]
-        raw_blocks = self.rpc.batch_call_chunked(
-            block_calls, self.cfg.rpc_batch_size
-        )
+        # ── 1. Fetch all blocks in parallel across endpoints ─────────────
+        block_results = self.pool.fetch_blocks_parallel(block_numbers)
 
-        # ── 2. Parse blocks & collect tx hashes ─────────────────────────
+        # ── 2. Reconcile data from multiple endpoints ────────────────────
+        self._reconcile(block_results)
+
+        # ── 3. Parse blocks, receipts, logs, token transfers ─────────────
         blocks: list[tuple] = []
         transactions: list[tuple] = []
-        tx_hashes: list[str] = []
-
-        for raw in raw_blocks:
-            if raw is None:
-                continue
-            blk, txs = parse_block_with_transactions(raw)
-            blocks.append(blk)
-            transactions.extend(txs)
-            tx_hashes.extend(tx[0] for tx in txs)  # field 0 = transaction_hash
-
-        # ── 3. Fetch all receipts ────────────────────────────────────────
-        if tx_hashes:
-            receipt_calls = [
-                ("eth_getTransactionReceipt", [h]) for h in tx_hashes
-            ]
-            raw_receipts = self.rpc.batch_call_chunked(
-                receipt_calls, self.cfg.rpc_batch_size
-            )
-        else:
-            raw_receipts = []
-
-        # ── 4. Parse receipts, logs, and token transfers ─────────────────
         receipts: list[tuple] = []
         logs: list[tuple] = []
         erc20_xfers: list[tuple] = []
         erc721_xfers: list[tuple] = []
 
-        for raw in raw_receipts:
-            if raw is None:
-                continue
-            rcpt, log_list = parse_receipt_with_logs(raw)
-            receipts.append(rcpt)
-            for log_tuple in log_list:
-                logs.append(log_tuple)
-                result = decode_transfer_from_log(log_tuple)
-                if result:
-                    kind, transfer = result
-                    if kind == "erc20":
-                        erc20_xfers.append(transfer)
-                    else:
-                        erc721_xfers.append(transfer)
+        for result in block_results:
+            # Block + embedded transactions
+            blk, txs = parse_block_with_transactions(result.raw_block)
+            blocks.append(blk)
+            transactions.extend(txs)
 
-        # ── 5. Atomic commit to PostgreSQL ───────────────────────────────
+            # Receipts + logs for this block
+            for raw_receipt in result.raw_receipts:
+                rcpt, log_list = parse_receipt_with_logs(raw_receipt)
+                receipts.append(rcpt)
+                for log_tuple in log_list:
+                    logs.append(log_tuple)
+                    xfer = decode_transfer_from_log(log_tuple)
+                    if xfer:
+                        kind, transfer = xfer
+                        if kind == "erc20":
+                            erc20_xfers.append(transfer)
+                        else:
+                            erc721_xfers.append(transfer)
+
+        # ── 4. Atomic commit to PostgreSQL ───────────────────────────────
         self.db.commit_batch(
             last_block=to_block,
             blocks=blocks,
@@ -202,16 +187,27 @@ class Indexer:
             erc721_transfers=erc721_xfers,
         )
 
-        # ── 6. Stats ────────────────────────────────────────────────────
+        # ── 5. Stats ────────────────────────────────────────────────────
         n_blocks = to_block - from_block + 1
         self._blocks_done += n_blocks
         elapsed = time.monotonic() - t_start
         total_elapsed = time.monotonic() - self._t0
         bps = self._blocks_done / total_elapsed if total_elapsed > 0 else 0
 
+        # Per-endpoint breakdown for this batch
+        ep_summary = {}
+        for r in block_results:
+            ep_summary.setdefault(r.endpoint, []).append(r.latency)
+
+        ep_str = "  ".join(
+            f"{url.split('//')[1][:30]}={len(lats)}blk/{sum(lats):.1f}s"
+            for url, lats in ep_summary.items()
+        )
+
         logger.info(
             "✔ %d–%d  |  %d blk  %d tx  %d rcpt  %d log  "
-            "%d erc20  %d erc721  | %.1fs  (%.1f blk/s avg)",
+            "%d erc20  %d erc721  | %.1fs  (%.1f blk/s avg)\n"
+            "    endpoints: %s",
             from_block,
             to_block,
             len(blocks),
@@ -222,4 +218,49 @@ class Indexer:
             len(erc721_xfers),
             elapsed,
             bps,
+            ep_str,
         )
+
+    # ---- reconciliation --------------------------------------------------
+
+    @staticmethod
+    def _reconcile(results: list[BlockResult]) -> None:
+        """
+        Verify data integrity across blocks fetched from different endpoints.
+
+        Checks:
+        1. Parent-hash chain — block N+1's parentHash must match block N's hash.
+           Raises on mismatch (indicates reorg or endpoint serving stale data).
+        2. Receipt completeness — every transaction must have a receipt.
+           Raises on mismatch (should not happen after _fetch_one_block's
+           own check, but acts as a safety net).
+
+        Raises
+        ------
+        RuntimeError
+            If any integrity check fails — the batch must NOT be committed.
+        """
+        for i in range(1, len(results)):
+            prev_hash = results[i - 1].raw_block.get("hash", "").lower()
+            curr_parent = results[i].raw_block.get("parentHash", "").lower()
+            if prev_hash and curr_parent and prev_hash != curr_parent:
+                raise RuntimeError(
+                    f"Parent-hash chain break at block {results[i].block_number}: "
+                    f"expected parent={prev_hash[:18]}… got={curr_parent[:18]}… "
+                    f"(prev from {results[i - 1].endpoint}, "
+                    f"curr from {results[i].endpoint}). "
+                    f"Possible chain reorg — batch will be retried."
+                )
+
+        for result in results:
+            expected = len([
+                tx for tx in result.raw_block.get("transactions", [])
+                if isinstance(tx, dict)
+            ])
+            actual = len(result.raw_receipts)
+            if expected != actual:
+                raise RuntimeError(
+                    f"Block {result.block_number}: expected {expected} receipts, "
+                    f"got {actual} (endpoint {result.endpoint}). "
+                    f"Batch will be retried."
+                )

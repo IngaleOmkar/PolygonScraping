@@ -18,7 +18,7 @@ _BLOCKS_SQL = """
 INSERT INTO blocks (
     block_number, block_hash, parent_hash, nonce, sha3_uncles,
     logs_bloom, transactions_root, state_root, receipts_root,
-    miner, difficulty, total_difficulty, size, extra_data,
+    miner, proposer, difficulty, total_difficulty, size, extra_data,
     gas_limit, gas_used, base_fee_per_gas, block_timestamp
 ) VALUES %s
 ON CONFLICT (block_number) DO NOTHING

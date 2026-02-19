@@ -63,6 +63,7 @@ def parse_block_with_transactions(
         raw["stateRoot"].lower(),                                           # state_root
         raw["receiptsRoot"].lower(),                                        # receipts_root
         raw["miner"].lower(),                                               # miner
+        None,                                                               # proposer (TODO: recover from Bor extraData via ecrecover)
         hex_to_int(raw.get("difficulty")),                                  # difficulty
         hex_to_int(raw.get("totalDifficulty")),                             # total_difficulty
         hex_to_int(raw.get("size")),                                        # size
