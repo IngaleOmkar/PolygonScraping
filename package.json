@@ -1,0 +1,20 @@
+{
+  "name": "polygon-indexer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --loader ts-node/esm src/processor.ts"
+  },
+  "dependencies": {
+    "@subsquid/evm-processor": "^1.27.3",
+    "dotenv": "^16.4.5",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0"
+  }
+}
