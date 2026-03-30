@@ -12,7 +12,7 @@ export const processor = new EvmBatchProcessor()
     .setBlockRange({ from: 47_000_000, to: 54_000_000 })
     .addLog({
         // Capture all ERC20/ERC721 Transfers for clustering
-        topic0: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'] 
+        topic0: ['0xddf252ad1be2c89b69c2b068fc378daf8d8d9a7ef30e63f76eb2d3dbe75bfd92'] 
     })
     .addTransaction({
         // Captures standard EOA to EOA/Contract calls
