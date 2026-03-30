@@ -1,0 +1,42 @@
+type Block @entity {
+  id: ID! # Block number
+  height: Int! @index
+  hash: String!
+  timestamp: DateTime! @index
+  # Relations to see full content
+  transactions: [Transaction] @derivedFrom(field: "block")
+  logs: [Log] @derivedFrom(field: "block")
+  traces: [Trace] @derivedFrom(field: "block")
+}
+
+type Transaction @entity {
+  id: ID! # hash
+  block: Block! @index
+  blockNumber: Int! @index
+  hash: String! @index
+  from: String! @index
+  to: String
+  value: BigInt!
+  gasUsed: BigInt!
+}
+
+type Log @entity {
+  id: ID!
+  block: Block! @index
+  blockNumber: Int! @index
+  transactionHash: String! @index
+  address: String! @index 
+  topic0: String @index
+  data: String
+}
+
+type Trace @entity {
+  id: ID!
+  block: Block! @index
+  blockNumber: Int! @index
+  transactionHash: String! @index
+  from: String! @index
+  to: String @index
+  type: String! 
+  value: BigInt
+}
