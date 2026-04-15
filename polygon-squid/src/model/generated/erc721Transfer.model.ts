@@ -2,8 +2,8 @@ import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, M
 import {Block} from "./block.model"
 
 @Entity_()
-export class Trace {
-    constructor(props?: Partial<Trace>) {
+export class Erc721Transfer {
+    constructor(props?: Partial<Erc721Transfer>) {
         Object.assign(this, props)
     }
 
@@ -24,15 +24,17 @@ export class Trace {
 
     @Index_()
     @StringColumn_({nullable: false})
+    contractAddress!: string
+
+    @Index_()
+    @StringColumn_({nullable: false})
     from!: string
 
     @Index_()
-    @StringColumn_({nullable: true})
-    to!: string | undefined | null
-
     @StringColumn_({nullable: false})
-    type!: string
+    to!: string
 
-    @BigIntColumn_({nullable: true})
-    value!: bigint | undefined | null
+    @Index_()
+    @BigIntColumn_({nullable: false})
+    tokenId!: bigint
 }

@@ -19,8 +19,8 @@ export class Log {
     blockNumber!: number
 
     @Index_()
-    @StringColumn_({nullable: false})
-    transactionHash!: string
+    @StringColumn_({nullable: true})
+    transactionHash!: string | undefined | null
 
     @Index_()
     @StringColumn_({nullable: false})

@@ -1,10 +1,37 @@
 services:
+
   db:
     image: postgres:15
     environment:
-      POSTGRES_DB: squid
+      POSTGRES_DB:       squid
+      POSTGRES_USER:     postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "${DB_PORT}:5432"
-      # command: ["postgres", "-c", "log_statement=all"]
+      - "${DB_PORT:-5432}:5432"
     shm_size: 1gb
+    healthcheck:
+      test:     ["CMD-SHELL", "pg_isready -U postgres -d squid"]
+      interval: 5s
+      timeout:  5s
+      retries:  10
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  processor:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy   # waits for postgres to be ready
+    environment:
+      # TypeORM / squid-typeorm-migration reads this
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: squid
+      DB_PASS: postgres
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/squid
+      # Your Polygon RPC — passed from the host .env
+      RPC_POLYGON_HTTP: ${RPC_POLYGON_HTTP}
+    restart: on-failure:5           # retry if migrations or RPC blip causes crash
+
+volumes:
+  pg_data:

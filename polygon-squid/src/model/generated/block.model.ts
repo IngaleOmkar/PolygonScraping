@@ -2,6 +2,8 @@ import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, I
 import {Transaction} from "./transaction.model"
 import {Log} from "./log.model"
 import {Trace} from "./trace.model"
+import {Erc20Transfer} from "./erc20Transfer.model"
+import {Erc721Transfer} from "./erc721Transfer.model"
 
 @Entity_()
 export class Block {
@@ -31,4 +33,10 @@ export class Block {
 
     @OneToMany_(() => Trace, e => e.block)
     traces!: Trace[]
+
+    @OneToMany_(() => Erc20Transfer, e => e.block)
+    erc20Transfers!: Erc20Transfer[]
+
+    @OneToMany_(() => Erc721Transfer, e => e.block)
+    erc721Transfers!: Erc721Transfer[]
 }
